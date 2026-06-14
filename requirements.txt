@@ -1,7 +1,7 @@
 streamlit==1.45.0
 easyocr==1.7.2
 pymorphy3==2.0.3
-Pillow==11.2.1
+Pillow
 numpy==1.26.4
 torch
 torchvision
