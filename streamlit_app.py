@@ -16,13 +16,6 @@ def load_ocr():
 def load_morph():
     return pymorphy3.MorphAnalyzer()
 
-@st.cache_data
-def load_dictionary():
-    """Загружаем словарь допустимых слов из pymorphy3"""
-    morph = pymorphy3.MorphAnalyzer()
-    # pymorphy3 сам является словарём — проверяем через него
-    return morph
-
 reader = load_ocr()
 morph = load_morph()
 
@@ -32,20 +25,16 @@ morph = load_morph()
 
 def check_spelling(word, morph):
     """Проверка орфографии через pymorphy3"""
-    # Убираем знаки препинания
     clean = word.strip(".,!?;:\"'()-–—")
     if not clean:
         return None
 
-    # Пропускаем числа
     if clean.isdigit():
         return None
 
-    # Проверяем, знает ли pymorphy3 это слово
     parsed = morph.parse(clean.lower())
     best = parsed[0]
 
-    # Если score очень низкий — скорее всего слово некорректное
     if best.score < 0.01 and len(clean) > 2:
         return {
             "word": word,
@@ -69,9 +58,7 @@ def check_grammar_simple(words, morph):
         p1 = morph.parse(w1)[0]
         p2 = morph.parse(w2)[0]
 
-        # Проверяем пару: прилагательное + существительное
         if ('ADJF' in p1.tag and 'NOUN' in p2.tag):
-            # Проверяем согласование по роду
             gender1 = p1.tag.gender
             gender2 = p2.tag.gender
             if gender1 and gender2 and gender1 != gender2:
@@ -82,7 +69,6 @@ def check_grammar_simple(words, morph):
                     "confidence": 0.8
                 })
 
-            # Проверяем согласование по числу
             number1 = p1.tag.number
             number2 = p2.tag.number
             if number1 and number2 and number1 != number2:
@@ -100,13 +86,11 @@ def analyze_text(text, morph):
     words = text.split()
     errors = []
 
-    # 1. Проверка орфографии
     for word in words:
         error = check_spelling(word, morph)
         if error:
             errors.append(error)
 
-    # 2. Проверка грамматики
     grammar_errors = check_grammar_simple(words, morph)
     errors.extend(grammar_errors)
 
@@ -128,10 +112,27 @@ def calculate_metrics(errors, words):
     return errors_per_100, error_rate, score
 
 
+def prepare_image(uploaded_file):
+    """
+    Открывает изображение, конвертирует в RGB
+    и ограничивает размер для безопасной обработки
+    """
+    image = Image.open(uploaded_file)
+
+    # Конвертируем любой режим (RGBA, L, P, CMYK и др.) в RGB
+    if image.mode != 'RGB':
+        image = image.convert('RGB')
+
+    # Ограничиваем размер чтобы избежать OOM и таймаутов
+    MAX_SIZE = (1800, 1800)
+    image.thumbnail(MAX_SIZE, Image.LANCZOS)
+
+    return image
+
+
 # ============================================
 # Интерфейс Streamlit
 # ============================================
-
 
 st.title("📝 Оценка грамотности рукописного текста")
 st.markdown("Загрузите фотографию рукописного текста для автоматической проверки")
@@ -154,19 +155,32 @@ if mode == "📷 Загрузить изображение":
     )
 
     if uploaded_file is not None:
-        # Показываем изображение
-        image = Image.open(uploaded_file)
+        # Подготовка изображения с обработкой ошибок
+        try:
+            image = prepare_image(uploaded_file)
+        except Exception as e:
+            st.error(f"❌ Не удалось открыть изображение: {e}")
+            st.stop()
+
         col1, col2 = st.columns(2)
 
         with col1:
             st.subheader("Загруженное изображение")
             st.image(image, use_container_width=True)
 
-        # Распознавание
+        # Распознавание текста с обработкой ошибок
         with st.spinner("🔄 Распознавание текста..."):
-            image_np = np.array(image)
-            results = reader.readtext(image_np, paragraph=True)
-            recognized_text = " ".join([r[1] for r in results])
+            try:
+                image_np = np.array(image)
+                results = reader.readtext(image_np, paragraph=True)
+
+                # Защита от неожиданной структуры результата
+                recognized_text = " ".join([
+                    r[1] for r in results if len(r) > 1
+                ])
+            except Exception as e:
+                st.error(f"❌ Ошибка при распознавании текста: {e}")
+                st.stop()
 
         with col2:
             st.subheader("Распознанный текст")
@@ -178,31 +192,36 @@ if mode == "📷 Загрузить изображение":
 
         # Анализ грамотности
         if st.button("🔍 Проверить грамотность", type="primary"):
-            errors, words = analyze_text(recognized_text, morph)
-            errors_per_100, error_rate, score = calculate_metrics(errors, words)
+            if recognized_text.strip():
+                try:
+                    errors, words = analyze_text(recognized_text, morph)
+                    errors_per_100, error_rate, score = calculate_metrics(errors, words)
 
-            # Метрики
-            st.subheader("📊 Результаты")
-            m1, m2, m3, m4 = st.columns(4)
-            m1.metric("Слов в тексте", len(words))
-            m2.metric("Ошибок найдено", len(errors))
-            m3.metric("Ошибок на 100 слов", f"{errors_per_100:.1f}")
-            m4.metric("Оценка грамотности", f"{score:.0f}/100")
+                    # Метрики
+                    st.subheader("📊 Результаты")
+                    m1, m2, m3, m4 = st.columns(4)
+                    m1.metric("Слов в тексте", len(words))
+                    m2.metric("Ошибок найдено", len(errors))
+                    m3.metric("Ошибок на 100 слов", f"{errors_per_100:.1f}")
+                    m4.metric("Оценка грамотности", f"{score:.0f}/100")
 
-            # Прогресс-бар оценки
-            st.progress(score / 100)
+                    st.progress(score / 100)
 
-            # Список ошибок
-            if errors:
-                st.subheader("❌ Найденные ошибки")
-                for i, e in enumerate(errors, 1):
-                    with st.expander(f"Ошибка {i}: «{e['word']}» — {e['type']}"):
-                        st.write(f"**Тип:** {e['type']}")
-                        st.write(f"**Слово/фраза:** {e['word']}")
-                        st.write(f"**Пояснение:** {e['suggestion']}")
-                        st.write(f"**Уверенность:** {e['confidence']:.0%}")
+                    if errors:
+                        st.subheader("❌ Найденные ошибки")
+                        for i, e in enumerate(errors, 1):
+                            with st.expander(f"Ошибка {i}: «{e['word']}» — {e['type']}"):
+                                st.write(f"**Тип:** {e['type']}")
+                                st.write(f"**Слово/фраза:** {e['word']}")
+                                st.write(f"**Пояснение:** {e['suggestion']}")
+                                st.write(f"**Уверенность:** {e['confidence']:.0%}")
+                    else:
+                        st.success("✅ Ошибок не найдено!")
+
+                except Exception as e:
+                    st.error(f"❌ Ошибка при анализе текста: {e}")
             else:
-                st.success("✅ Ошибок не найдено!")
+                st.warning("⚠️ Текст не распознан. Попробуйте другое изображение.")
 
 # ============================================
 # Режим 2: Ввод текста вручную
@@ -218,32 +237,35 @@ else:
 
     if st.button("🔍 Проверить грамотность", type="primary"):
         if manual_text.strip():
-            errors, words = analyze_text(manual_text, morph)
-            errors_per_100, error_rate, score = calculate_metrics(errors, words)
+            try:
+                errors, words = analyze_text(manual_text, morph)
+                errors_per_100, error_rate, score = calculate_metrics(errors, words)
 
-            # Метрики
-            st.subheader("📊 Результаты")
-            m1, m2, m3, m4 = st.columns(4)
-            m1.metric("Слов в тексте", len(words))
-            m2.metric("Ошибок найдено", len(errors))
-            m3.metric("Ошибок на 100 слов", f"{errors_per_100:.1f}")
-            m4.metric("Оценка грамотности", f"{score:.0f}/100")
+                # Метрики
+                st.subheader("📊 Результаты")
+                m1, m2, m3, m4 = st.columns(4)
+                m1.metric("Слов в тексте", len(words))
+                m2.metric("Ошибок найдено", len(errors))
+                m3.metric("Ошибок на 100 слов", f"{errors_per_100:.1f}")
+                m4.metric("Оценка грамотности", f"{score:.0f}/100")
 
-            st.progress(score / 100)
+                st.progress(score / 100)
 
-            if errors:
-                st.subheader("❌ Найденные ошибки")
-                for i, e in enumerate(errors, 1):
-                    with st.expander(f"Ошибка {i}: «{e['word']}» — {e['type']}"):
-                        st.write(f"**Тип:** {e['type']}")
-                        st.write(f"**Слово/фраза:** {e['word']}")
-                        st.write(f"**Пояснение:** {e['suggestion']}")
-                        st.write(f"**Уверенность:** {e['confidence']:.0%}")
-            else:
-                st.success("✅ Ошибок не найдено!")
+                if errors:
+                    st.subheader("❌ Найденные ошибки")
+                    for i, e in enumerate(errors, 1):
+                        with st.expander(f"Ошибка {i}: «{e['word']}» — {e['type']}"):
+                            st.write(f"**Тип:** {e['type']}")
+                            st.write(f"**Слово/фраза:** {e['word']}")
+                            st.write(f"**Пояснение:** {e['suggestion']}")
+                            st.write(f"**Уверенность:** {e['confidence']:.0%}")
+                else:
+                    st.success("✅ Ошибок не найдено!")
+
+            except Exception as e:
+                st.error(f"❌ Ошибка при анализе текста: {e}")
         else:
-            st.warning("Введите текст для проверки")
+            st.warning("⚠️ Введите текст для проверки")
 
 # Подвал
 st.markdown("---")
-st.markdown("*Дипломная работа — Разработка мобильного приложения для оценки грамотности речи*")
