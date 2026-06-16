@@ -28,7 +28,6 @@ reader, processor, model = load_ocr()
 def load_morph():
     return pymorphy3.MorphAnalyzer()
 
-reader = load_ocr()
 morph = load_morph()
 
 # ============================================
