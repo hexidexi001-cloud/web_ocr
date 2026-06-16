@@ -214,6 +214,8 @@ if mode == "📷 Загрузить изображение":
                     # Теперь выводим итоговый текст в интерфейс Streamlit
                     st.text_area("Результат распознавания:", value=final_result_text, height=300)
 
+            except Exception as e:
+                st.warning(e)
 
         with col2:
             st.subheader("Распознанный текст")
