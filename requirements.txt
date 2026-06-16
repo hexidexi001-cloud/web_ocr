@@ -1,7 +1,10 @@
-streamlit==1.45.0
-easyocr==1.7.2
-pymorphy3==2.0.3
+streamlit
+torch --index-url https://pytorch.org
+torchvision --index-url https://pytorch.org
+transformers
+evaluate
+jiwer
+datasets
+easyocr
+numpy
 Pillow
-numpy==1.26.4
-torch
-torchvision
