@@ -189,12 +189,37 @@ if mode == "📷 Загрузить изображение":
                     st.warning("Текст на изображении не обнаружен.")
                 else:
                     # 2. Сортируем рамки сверху вниз по координате y верхнего левого угла (box[0][0][1])
-                    ocr_results = sorted(ocr_results, key=lambda x: x[0][0][1])
-            
+                    ocr_results = sorted(ocr_results, key=lambda x: x[0][0][1])            
                     full_page_text = []
-            
+                    grouped_lines = []
+                    if len(ocr_results) > 0:
+                        current_line = [ocr_results[0]]
+                        
+                        for result in ocr_results[1:]:
+                            # Получаем координату Y текущего слова и предыдущего слова
+                            prev_y = current_line[-1][0][0][1]
+                            curr_y = result[0][0][1]
+                            
+                            # Получаем среднюю высоту рамки, чтобы задать порог
+                            prev_height = current_line[-1][0][3][1] - current_line[-1][0][0][1]
+                            
+                            # Если разница по высоте между словами меньше половины высоты буквы — это одна строка!
+                            if abs(curr_y - prev_y) < (prev_height * 0.5):
+                                current_line.append(result)
+                            else:
+                                grouped_lines.append(current_line)
+                                current_line = [result]
+                        grouped_lines.append(current_line)
+                    
+                    # 2. Теперь внутри каждой строки сортируем слова слева направо по координате X
+                    final_sorted_results = []
+                    for line in grouped_lines:
+                        line_sorted_by_x = sorted(line, key=lambda x: x[0][0][0])
+                        final_sorted_results.extend(line_sorted_by_x)
+                    
+                        
                     # 3. Проходим циклом по каждой найденной строке
-                    for result in ocr_results:
+                    for result in final_sorted_results:
                         box = result[0] # Получаем только массив координат углов
                         
                         # Извлекаем крайние точки для прямоугольного кропа (xmin, ymin, xmax, ymax)
