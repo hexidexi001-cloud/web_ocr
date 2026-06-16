@@ -10,7 +10,17 @@ import numpy as np
 
 @st.cache_resource
 def load_ocr():
-    return easyocr.Reader(['ru'], gpu=False)
+    reader = easyocr.Reader(['ru'], gpu=False)
+    hf_model_repo = "AnatoliiPa/trocr_model"
+
+    processor = TrOCRProcessor.from_pretrained(hf_model_repo)
+    model = VisionEncoderDecoderModel.from_pretrained(hf_model_repo)
+
+    model.to("cpu")
+
+    return reader, processor, model
+
+reader, processor, model = load_ocr()
 
 @st.cache_resource
 def load_morph():
@@ -172,15 +182,37 @@ if mode == "📷 Загрузить изображение":
         with st.spinner("🔄 Распознавание текста..."):
             try:
                 image_np = np.array(image)
-                results = reader.readtext(image_np, paragraph=True)
+                horizontal_boxes, free_boxes = reader.detect(image_np)
+                boxes = horizontal_boxes
+                boxes = sorted(boxes, key=lambda b: b[2]) #сортировка рамки сверху вних по ymin
+                if len(boxes) == 0:
+                    st.warning("Текст на изображении не обнаружен")
+                else:
+                      full_page_text = []
 
-                # Защита от неожиданной структуры результата
-                recognized_text = " ".join([
-                    r[1] for r in results if len(r) > 1
-                ])
-            except Exception as e:
-                st.error(f"❌ Ошибка при распознавании текста: {e}")
-                st.stop()
+                    for box in boxes:
+                        xmin, xmax, ymin, ymax = int(box[0]), int(box[1]), int(box[2]), int(box[3])
+                        
+                        # Вырезаем полоску-строку из оригинального PIL-изображения
+                        # Добавляем небольшой отступ в 3 пикселя, чтобы не срезались края букв
+                        line_crop = image.crop((max(0, xmin - 3), max(0, ymin - 3), xmax + 3, ymax + 3))
+                        
+                        # Шаг 3: Распознаем вырезанную строку с помощью вашей TrOCR
+                        pixel_values = processor(line_crop, return_tensors="pt").pixel_values
+                        
+                        with torch.no_grad():
+                            generated_ids = model.generate(pixel_values)
+                            
+                        # Декодируем токены ИИ в понятный русский текст
+                        line_text = processor.batch_decode(generated_ids, skip_special_tokens=True)[0]
+                        
+                        # Добавляем строку в общий список результатов
+                        full_page_text.append(line_text)
+                    final_result_text = "\n".join(full_page_text)
+                
+                    # Теперь выводим итоговый текст в интерфейс Streamlit
+                    st.text_area("Результат распознавания:", value=final_result_text, height=300)
+
 
         with col2:
             st.subheader("Распознанный текст")
