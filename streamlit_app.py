@@ -3,6 +3,8 @@ import easyocr
 import pymorphy3
 from PIL import Image
 import numpy as np
+from transformers import TrOCRProcessor, VisionEncoderDecoderModel
+import torch
 
 # ============================================
 # Инициализация моделей (кэшируем для скорости)
