@@ -248,7 +248,7 @@ if mode == "📷 Загрузить изображение":
                         full_page_text.append(line_text)
 
                      # Объединяем все распознанные строки через перенос строки
-                    final_result_text = "\n".join(full_page_text)
+                    final_result_text = " ".join(full_page_text)
                     
                     # Выводим итоговый текст в интерфейс Streamlit
                     st.text_area("Результат распознавания:", value=final_result_text, height=300)
@@ -258,6 +258,9 @@ if mode == "📷 Загрузить изображение":
                 st.warning(e)
 
         with col2:
+            if 'final_result_text' in locals() and final_result_text is not None:
+                if isinstance(final_result_text, str) and final_result_text.strip():
+                    recognized_text = final_result_text
             st.subheader("Распознанный текст")
             recognized_text = st.text_area(
                 "Вы можете исправить ошибки OCR:",
