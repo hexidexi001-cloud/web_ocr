@@ -145,11 +145,11 @@ def prepare_image(uploaded_file):
 # Интерфейс Streamlit
 # ============================================
 
-st.title("📝 Оценка грамотности рукописного текста")
+st.title("Оценка грамотности рукописного текста")
 st.markdown("Загрузите фотографию рукописного текста для автоматической проверки")
 
 # Боковая панель
-st.sidebar.header("⚙️ Настройки")
+st.sidebar.header("Настройки")
 mode = st.sidebar.radio(
     "Режим ввода:",
     ["📷 Загрузить изображение", "⌨️ Ввести текст вручную"]
@@ -232,7 +232,7 @@ if mode == "📷 Загрузить изображение":
                         # Вырезаем полоску-строку из оригинального PIL-изображения с небольшим отступом
                         line_crop = image.crop((max(0, xmin - 3), max(0, ymin - 3), xmax + 3, ymax + 3))
                         
-                        # 4. Распознаем вырезанную строку с помощью вашей модели TrOCR
+                        # 4. Распознаем вырезанную строку с помощью модели TrOCR
                         pixel_values = processor(line_crop, return_tensors="pt").pixel_values
                         
                         with torch.no_grad():
@@ -250,9 +250,6 @@ if mode == "📷 Загрузить изображение":
                      # Объединяем все распознанные строки через перенос строки
                     final_result_text = " ".join(full_page_text)
                     
-                    # Выводим итоговый текст в интерфейс Streamlit
-                    st.text_area("Результат распознавания:", value=final_result_text, height=300)
-
         
             except Exception as e:
                 st.warning(e)
