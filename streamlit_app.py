@@ -183,38 +183,52 @@ if mode == "📷 Загрузить изображение":
         with st.spinner("🔄 Распознавание текста..."):
             try:
                 image_np = np.array(image)
-                horizontal_boxes, free_boxes = reader.detect(image_np)
-                boxes = horizontal_boxes
-                boxes = sorted(boxes, key=lambda b: b[2]) #сортировка рамки сверху вних по ymin
-                if len(boxes) == 0:
-                    st.warning("Текст на изображении не обнаружен")
-                else:
-                    
-                    full_page_text = []
+                ocr_results = reader.readtext(image_np)
 
-                    for box in boxes:
-                        xmin, xmax, ymin, ymax = int(box[0]), int(box[1]), int(box[2]), int(box[3])
+                if len(ocr_results) == 0:
+                    st.warning("Текст на изображении не обнаружен.")
+                else:
+                    # 2. Сортируем рамки сверху вниз по координате y верхнего левого угла (box[0][0][1])
+                    ocr_results = sorted(ocr_results, key=lambda x: x[0][0][1])
+            
+                    full_page_text = []
+            
+                    # 3. Проходим циклом по каждой найденной строке
+                    for result in ocr_results:
+                        box = result[0] # Получаем только массив координат углов
                         
-                        # Вырезаем полоску-строку из оригинального PIL-изображения
-                        # Добавляем небольшой отступ в 3 пикселя, чтобы не срезались края букв
+                        # Извлекаем крайние точки для прямоугольного кропа (xmin, ymin, xmax, ymax)
+                        x_coords = [p[0] for p in box]
+                        y_coords = [p[1] for p in box]
+                        
+                        xmin, xmax = int(min(x_coords)), int(max(x_coords))
+                        ymin, ymax = int(min(y_coords)), int(max(y_coords))
+
+                        # Вырезаем полоску-строку из оригинального PIL-изображения с небольшим отступом
                         line_crop = image.crop((max(0, xmin - 3), max(0, ymin - 3), xmax + 3, ymax + 3))
                         
-                        # Шаг 3: Распознаем вырезанную строку с помощью вашей TrOCR
+                        # 4. Распознаем вырезанную строку с помощью вашей модели TrOCR
                         pixel_values = processor(line_crop, return_tensors="pt").pixel_values
                         
                         with torch.no_grad():
                             generated_ids = model.generate(pixel_values)
                             
                         # Декодируем токены ИИ в понятный русский текст
-                        line_text = processor.batch_decode(generated_ids, skip_special_tokens=True)[0]
+                        line_text = processor.batch_decode(generated_ids, skip_special_tokens=True)
                         
-                        # Добавляем строку в общий список результатов
+                        # Если модель вернула список строк, берем первую
+                        if isinstance(line_text, list):
+                            line_text = line_text[0] if len(line_text) > 0 else ""
+                            
                         full_page_text.append(line_text)
+
+                     # Объединяем все распознанные строки через перенос строки
                     final_result_text = "\n".join(full_page_text)
-                
-                    # Теперь выводим итоговый текст в интерфейс Streamlit
+                    
+                    # Выводим итоговый текст в интерфейс Streamlit
                     st.text_area("Результат распознавания:", value=final_result_text, height=300)
 
+        
             except Exception as e:
                 st.warning(e)
 
