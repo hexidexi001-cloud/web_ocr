@@ -188,7 +188,8 @@ if mode == "📷 Загрузить изображение":
                 if len(boxes) == 0:
                     st.warning("Текст на изображении не обнаружен")
                 else:
-                      full_page_text = []
+                    
+                    full_page_text = []
 
                     for box in boxes:
                         xmin, xmax, ymin, ymax = int(box[0]), int(box[1]), int(box[2]), int(box[3])
