@@ -148,176 +148,120 @@ def prepare_image(uploaded_file):
 st.title("Оценка грамотности рукописного текста")
 st.markdown("Загрузите фотографию рукописного текста для автоматической проверки")
 
-# Боковая панель
-st.sidebar.header("Настройки")
-mode = st.sidebar.radio(
-    "Режим ввода:",
-    ["📷 Загрузить изображение", "⌨️ Ввести текст вручную"]
+uploaded_file = st.file_uploader(
+    "Выберите изображение",
+    type=["jpg", "jpeg", "png", "bmp"]
 )
 
-# ============================================
-# Режим 1: Загрузка изображения
-# ============================================
+if uploaded_file is not None:
+    # Подготовка изображения с обработкой ошибок
+    try:
+        image = prepare_image(uploaded_file)
+    except Exception as e:
+        st.error(f"Не удалось открыть изображение: {e}")
+        st.stop()
 
-if mode == "📷 Загрузить изображение":
-    uploaded_file = st.file_uploader(
-        "Выберите изображение",
-        type=["jpg", "jpeg", "png", "bmp"]
-    )
+    col1, col2 = st.columns(2)
 
-    if uploaded_file is not None:
-        # Подготовка изображения с обработкой ошибок
+    with col1:
+        st.subheader("Загруженное изображение")
+        st.image(image, use_container_width=True)
+
+    # Распознавание текста с обработкой ошибок
+    with st.spinner("Распознавание текста..."):
         try:
-            image = prepare_image(uploaded_file)
-        except Exception as e:
-            st.error(f"❌ Не удалось открыть изображение: {e}")
-            st.stop()
+            image_np = np.array(image)
+            ocr_results = reader.readtext(image_np)
 
-        col1, col2 = st.columns(2)
-
-        with col1:
-            st.subheader("Загруженное изображение")
-            st.image(image, use_container_width=True)
-
-        # Распознавание текста с обработкой ошибок
-        with st.spinner("🔄 Распознавание текста..."):
-            try:
-                image_np = np.array(image)
-                ocr_results = reader.readtext(image_np)
-
-                if len(ocr_results) == 0:
-                    st.warning("Текст на изображении не обнаружен.")
-                else:
-                    # 2. Сортируем рамки сверху вниз по координате y верхнего левого угла (box[0][0][1])
-                    ocr_results = sorted(ocr_results, key=lambda x: x[0][0][1])            
-                    full_page_text = []
-                    grouped_lines = []
-                    if len(ocr_results) > 0:
-                        current_line = [ocr_results[0]]
-                        
-                        for result in ocr_results[1:]:
-                            # Получаем координату Y текущего слова и предыдущего слова
-                            prev_y = current_line[-1][0][0][1]
-                            curr_y = result[0][0][1]
-                            
-                            # Получаем среднюю высоту рамки, чтобы задать порог
-                            prev_height = current_line[-1][0][3][1] - current_line[-1][0][0][1]
-                            
-                            # Если разница по высоте между словами меньше половины высоты буквы — это одна строка!
-                            if abs(curr_y - prev_y) < (prev_height * 0.5):
-                                current_line.append(result)
-                            else:
-                                grouped_lines.append(current_line)
-                                current_line = [result]
-                        grouped_lines.append(current_line)
-                    
-                    # 2. Теперь внутри каждой строки сортируем слова слева направо по координате X
-                    final_sorted_results = []
-                    for line in grouped_lines:
-                        line_sorted_by_x = sorted(line, key=lambda x: x[0][0][0])
-                        final_sorted_results.extend(line_sorted_by_x)
-                    
-                        
-                    # 3. Проходим циклом по каждой найденной строке
-                    for result in final_sorted_results:
-                        box = result[0] # Получаем только массив координат углов
-                        
-                        # Извлекаем крайние точки для прямоугольного кропа (xmin, ymin, xmax, ymax)
-                        x_coords = [p[0] for p in box]
-                        y_coords = [p[1] for p in box]
-                        
-                        xmin, xmax = int(min(x_coords)), int(max(x_coords))
-                        ymin, ymax = int(min(y_coords)), int(max(y_coords))
-
-                        # Вырезаем полоску-строку из оригинального PIL-изображения с небольшим отступом
-                        line_crop = image.crop((max(0, xmin - 3), max(0, ymin - 3), xmax + 3, ymax + 3))
-                        
-                        # 4. Распознаем вырезанную строку с помощью модели TrOCR
-                        pixel_values = processor(line_crop, return_tensors="pt").pixel_values
-                        
-                        with torch.no_grad():
-                            generated_ids = model.generate(pixel_values)
-                            
-                        # Декодируем токены ИИ в понятный русский текст
-                        line_text = processor.batch_decode(generated_ids, skip_special_tokens=True)
-                        
-                        # Если модель вернула список строк, берем первую
-                        if isinstance(line_text, list):
-                            line_text = line_text[0] if len(line_text) > 0 else ""
-                            
-                        full_page_text.append(line_text)
-
-                     # Объединяем все распознанные строки через перенос строки
-                    final_result_text = " ".join(full_page_text)
-                    
-        
-            except Exception as e:
-                st.warning(e)
-
-        with col2:
-            if 'final_result_text' in locals() and final_result_text is not None:
-                if isinstance(final_result_text, str) and final_result_text.strip():
-                    recognized_text = final_result_text
-            st.subheader("Распознанный текст")
-            recognized_text = st.text_area(
-                "Вы можете исправить ошибки OCR:",
-                value=recognized_text,
-                height=200
-            )
-
-        # Анализ грамотности
-        if st.button("🔍 Проверить грамотность", type="primary"):
-            if recognized_text.strip():
-                try:
-                    errors, words = analyze_text(recognized_text, morph)
-                    errors_per_100, error_rate, score = calculate_metrics(errors, words)
-
-                    # Метрики
-                    st.subheader("📊 Результаты")
-                    m1, m2, m3, m4 = st.columns(4)
-                    m1.metric("Слов в тексте", len(words))
-                    m2.metric("Ошибок найдено", len(errors))
-                    m3.metric("Ошибок на 100 слов", f"{errors_per_100:.1f}")
-                    m4.metric("Оценка грамотности", f"{score:.0f}/100")
-
-                    st.progress(score / 100)
-
-                    if errors:
-                        st.subheader("❌ Найденные ошибки")
-                        for i, e in enumerate(errors, 1):
-                            with st.expander(f"Ошибка {i}: «{e['word']}» — {e['type']}"):
-                                st.write(f"**Тип:** {e['type']}")
-                                st.write(f"**Слово/фраза:** {e['word']}")
-                                st.write(f"**Пояснение:** {e['suggestion']}")
-                                st.write(f"**Уверенность:** {e['confidence']:.0%}")
-                    else:
-                        st.success("✅ Ошибок не найдено!")
-
-                except Exception as e:
-                    st.error(f"❌ Ошибка при анализе текста: {e}")
+            if len(ocr_results) == 0:
+                st.warning("Текст на изображении не обнаружен.")
             else:
-                st.warning("⚠️ Текст не распознан. Попробуйте другое изображение.")
+                # 2. Сортируем рамки сверху вниз по координате y верхнего левого угла (box[0][0][1])
+                ocr_results = sorted(ocr_results, key=lambda x: x[0][0][1])            
+                full_page_text = []
+                grouped_lines = []
+                if len(ocr_results) > 0:
+                    current_line = [ocr_results[0]]
+                    
+                    for result in ocr_results[1:]:
+                        # Получаем координату Y текущего слова и предыдущего слова
+                        prev_y = current_line[-1][0][0][1]
+                        curr_y = result[0][0][1]
+                        
+                        # Получаем среднюю высоту рамки, чтобы задать порог
+                        prev_height = current_line[-1][0][3][1] - current_line[-1][0][0][1]
+                        
+                        # Если разница по высоте между словами меньше половины высоты буквы — это одна строка!
+                        if abs(curr_y - prev_y) < (prev_height * 0.5):
+                            current_line.append(result)
+                        else:
+                            grouped_lines.append(current_line)
+                            current_line = [result]
+                    grouped_lines.append(current_line)
+                
+                # 2. Теперь внутри каждой строки сортируем слова слева направо по координате X
+                final_sorted_results = []
+                for line in grouped_lines:
+                    line_sorted_by_x = sorted(line, key=lambda x: x[0][0][0])
+                    final_sorted_results.extend(line_sorted_by_x)
+                
+                    
+                # 3. Проходим циклом по каждой найденной строке
+                for result in final_sorted_results:
+                    box = result[0] # Получаем только массив координат углов
+                    
+                    # Извлекаем крайние точки для прямоугольного кропа (xmin, ymin, xmax, ymax)
+                    x_coords = [p[0] for p in box]
+                    y_coords = [p[1] for p in box]
+                    
+                    xmin, xmax = int(min(x_coords)), int(max(x_coords))
+                    ymin, ymax = int(min(y_coords)), int(max(y_coords))
 
-# ============================================
-# Режим 2: Ввод текста вручную
-# ============================================
+                    # Вырезаем полоску-строку из оригинального PIL-изображения с небольшим отступом
+                    line_crop = image.crop((max(0, xmin - 3), max(0, ymin - 3), xmax + 3, ymax + 3))
+                    
+                    # 4. Распознаем вырезанную строку с помощью модели TrOCR
+                    pixel_values = processor(line_crop, return_tensors="pt").pixel_values
+                    
+                    with torch.no_grad():
+                        generated_ids = model.generate(pixel_values)
+                        
+                    # Декодируем токены ИИ в понятный русский текст
+                    line_text = processor.batch_decode(generated_ids, skip_special_tokens=True)
+                    
+                    # Если модель вернула список строк, берем первую
+                    if isinstance(line_text, list):
+                        line_text = line_text[0] if len(line_text) > 0 else ""
+                        
+                    full_page_text.append(line_text)
 
-else:
-    st.subheader("Введите текст для проверки")
-    manual_text = st.text_area(
-        "Текст:",
-        placeholder="Введите текст на русском языке...",
-        height=200
-    )
+                 # Объединяем все распознанные строки через перенос строки
+                final_result_text = " ".join(full_page_text)
+                
+    
+        except Exception as e:
+            st.warning(e)
 
-    if st.button("🔍 Проверить грамотность", type="primary"):
-        if manual_text.strip():
+    with col2:
+        if 'final_result_text' in locals() and final_result_text is not None:
+            if isinstance(final_result_text, str) and final_result_text.strip():
+                recognized_text = final_result_text
+        st.subheader("Распознанный текст")
+        recognized_text = st.text_area(
+            "Вы можете исправить ошибки OCR:",
+            value=recognized_text,
+            height=200
+        )
+
+    # Анализ грамотности
+    if st.button("Проверить грамотность", type="primary"):
+        if recognized_text.strip():
             try:
-                errors, words = analyze_text(manual_text, morph)
+                errors, words = analyze_text(recognized_text, morph)
                 errors_per_100, error_rate, score = calculate_metrics(errors, words)
 
                 # Метрики
-                st.subheader("📊 Результаты")
+                st.subheader("Результаты")
                 m1, m2, m3, m4 = st.columns(4)
                 m1.metric("Слов в тексте", len(words))
                 m2.metric("Ошибок найдено", len(errors))
@@ -327,7 +271,7 @@ else:
                 st.progress(score / 100)
 
                 if errors:
-                    st.subheader("❌ Найденные ошибки")
+                    st.subheader("Найденные ошибки")
                     for i, e in enumerate(errors, 1):
                         with st.expander(f"Ошибка {i}: «{e['word']}» — {e['type']}"):
                             st.write(f"**Тип:** {e['type']}")
@@ -335,12 +279,9 @@ else:
                             st.write(f"**Пояснение:** {e['suggestion']}")
                             st.write(f"**Уверенность:** {e['confidence']:.0%}")
                 else:
-                    st.success("✅ Ошибок не найдено!")
+                    st.success("Ошибок не найдено!")
 
             except Exception as e:
-                st.error(f"❌ Ошибка при анализе текста: {e}")
+                st.error(f"Ошибка при анализе текста: {e}")
         else:
-            st.warning("⚠️ Введите текст для проверки")
-
-# Подвал
-st.markdown("---")
+            st.warning("Текст не распознан. Попробуйте другое изображение.")
