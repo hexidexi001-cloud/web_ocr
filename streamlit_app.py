@@ -246,12 +246,12 @@ if uploaded_file is not None:
         if 'final_result_text' in locals() and final_result_text is not None:
             if isinstance(final_result_text, str) and final_result_text.strip():
                 recognized_text = final_result_text
-        st.subheader("Распознанный текст")
-        recognized_text = st.text_area(
-            "Вы можете исправить ошибки OCR:",
-            value=recognized_text,
-            height=200
-        )
+                st.subheader("Распознанный текст")
+                recognized_text = st.text_area(
+                    "Вы можете исправить ошибки OCR:",
+                    value=recognized_text,
+                    height=200
+                )
 
     # Анализ грамотности
     if st.button("Проверить грамотность", type="primary"):
